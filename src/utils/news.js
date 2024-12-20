@@ -69,52 +69,44 @@ const fetchNewsDetail = async (berita_id) => {
     const $ = cheerio.load(response.data);
     const detail = {};
 
-    // Menentukan selector untuk konten utama
-    const mainContentSelector = 'body > div.container > div.row > div.col-lg-9.order-1.order-lg-2.entry-contents__main-area > div > div';
+    // Selector utama untuk konten deskripsi
+    const mainContentSelector = "body > div.container > div.row > div.col-lg-9.order-1.order-lg-2.entry-contents__main-area > div > div > div:nth-child(4)";
     const mainContent = $(mainContentSelector);
 
     if (mainContent.length === 0) {
-      throw new Error('Konten utama tidak ditemukan.');
+      throw new Error("Konten utama tidak ditemukan.");
     }
 
+    // Menangkap deskripsi
     let deskripsi = '';
-    mainContent.find('p.MsoNormal, ul, ol').each((index, element) => {
-      const tagName = $(element).prop('tagName').toLowerCase();
+    mainContent.find("p, ul, ol, div").each((index, element) => {
+      const tagName = $(element).prop("tagName").toLowerCase();
 
-      if (tagName === 'p') {
+      // Tangkap teks dari elemen paragraf, daftar, atau div sederhana
+      if (tagName === "p" || tagName === "div") {
         deskripsi += $(element).text().trim() + "\n";
-      } else if (tagName === 'ul' || tagName === 'ol') {
+      } else if (tagName === "ul" || tagName === "ol") {
         $(element).children().each((i, child) => {
-          deskripsi += $(child).text().trim() + '\n';
+          deskripsi += "- " + $(child).text().trim() + "\n";
         });
       }
     });
 
-    detail['deskripsi'] = deskripsi.trim();
+    detail["deskripsi"] = deskripsi.trim();
 
+    // Menangkap gambar
     const gambarList = [];
-    mainContent.find('span[lang="EN-GB"], span[lang="EN"]').each((index, element) => {
-      const gambarElement = $(element).find('img');
-
-      if (gambarElement.length === 0) {
-        const nextImg = $(element).next('img');
-        if (nextImg.length > 0) {
-          gambarElement.push(nextImg[0]);
-        }
-      }
-
-      gambarElement.each((i, img) => {
-        const gambar = {
-          title: $(img).attr('title'),
-          src: $(img).attr('src'),
-          width: $(img).attr('width'),
-          height: $(img).attr('height'),
-        };
-        gambarList.push(gambar);
-      });
+    mainContent.find("img").each((index, img) => {
+      const gambar = {
+        title: $(img).attr("title") || "",
+        src: $(img).attr("src"),
+        width: $(img).attr("width"),
+        height: $(img).attr("height"),
+      };
+      gambarList.push(gambar);
     });
 
-    detail['gambar'] = gambarList;
+    detail["gambar"] = gambarList;
 
     return detail;
   } catch (error) {
