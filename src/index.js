@@ -56,7 +56,14 @@ const enableMaintenanceMode = () => {
 
 enableMaintenanceMode();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: ["http://rick.hidencloud.com:24576/"], // Ganti dengan domain yang diizinkan
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use("/api", routes);
 
 app.get("/", (req, res) => {
