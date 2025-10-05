@@ -2,11 +2,30 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+// Konfigurasi header agar menyerupai browser sungguhan
+const axiosConfig = {
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://jkt48.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "DNT": "1",
+  },
+};
+
+// URL proxy lokal kamu (ganti port jika berbeda)
+const PROXY_BASE = "https://proxi-web.vercel.app/fetch?url=";
+
 const fetchSpecificData = async () => {
-  const url = "https://jkt48.com/theater/schedule?lang=id";
+  const targetUrlrl = "https://jkt48.com/theater/schedule?lang=id";
+  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
 
   try {
-    const response = await axios.get(url);
+    const response = await axios.get(proxyUrl, axiosConfig);
     return response.data;
   } catch (error) {
     throw new Error(`Error fetching data: ${error.message}`);

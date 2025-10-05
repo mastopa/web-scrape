@@ -1,27 +1,46 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+// Konfigurasi header agar menyerupai browser sungguhan
 const axiosConfig = {
   headers: {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36",
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://jkt48.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "DNT": "1",
   },
 };
 
+// URL proxy lokal kamu (ganti port jika berbeda)
+const PROXY_BASE = "https://proxi-web.vercel.app/fetch?url=";
+
+// ============================================
+// Fungsi untuk fetch data berita via proxy
+// ============================================
 const fetchNewsData = async () => {
-  const url = "https://jkt48.com/news/list?lang=id";
+  const targetUrl = "https://jkt48.com/news/list?lang=id";
+  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
 
   try {
-    const response = await axios.get(url, axiosConfig);
+    const response = await axios.get(proxyUrl, axiosConfig);
     return response.data;
   } catch (error) {
     throw new Error(`Error fetching data: ${error.message}`);
   }
 };
 
+// ============================================
+// Fungsi parsing HTML berita
+// ============================================
 const parseNewsData = (html) => {
   const $ = cheerio.load(html);
   const list_berita_mentah = $(".entry-news__list");
-  
+
   if (!list_berita_mentah || list_berita_mentah.length === 0) {
     throw new Error("No news data found on the page.");
   }
@@ -48,10 +67,12 @@ const parseNewsData = (html) => {
     const url_berita_full = title_div.find("h3").find("a").attr("href");
     if (!url_berita_full) {
       console.warn("Missing URL for a news item. Skipping.");
-      return; // Skip this news item
+      return;
     }
 
-    const url_berita_full_rplc = url_berita_full.replace("?lang=id", "").replace("/news/detail/id/", "");
+    const url_berita_full_rplc = url_berita_full
+      .replace("?lang=id", "")
+      .replace("/news/detail/id/", "");
     model["berita_id"] = url_berita_full_rplc;
 
     data_list_berita.push(model);
@@ -60,41 +81,43 @@ const parseNewsData = (html) => {
   return { berita: data_list_berita };
 };
 
+// ============================================
+// Fungsi ambil detail berita via proxy
+// ============================================
 const fetchNewsDetail = async (berita_id) => {
-  const url = `https://jkt48.com/news/detail/id/${berita_id}?lang=id`;
+  const targetUrl = `https://jkt48.com/news/detail/id/${berita_id}?lang=id`;
+  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
 
   try {
-    const response = await axios.get(url, axiosConfig);
-
+    const response = await axios.get(proxyUrl, axiosConfig);
     const $ = cheerio.load(response.data);
     const detail = {};
 
-    // Selector utama untuk konten deskripsi
-    const mainContentSelector = "body > div.container > div.row > div.col-lg-9.order-1.order-lg-2.entry-contents__main-area > div > div > div:nth-child(4)";
+    const mainContentSelector =
+      "body > div.container > div.row > div.col-lg-9.order-1.order-lg-2.entry-contents__main-area > div > div > div:nth-child(4)";
     const mainContent = $(mainContentSelector);
 
     if (mainContent.length === 0) {
       throw new Error("Konten utama tidak ditemukan.");
     }
 
-    // Menangkap deskripsi
-    let deskripsi = '';
+    // ambil deskripsi
+    let deskripsi = "";
     mainContent.find("p, ul, ol, div").each((index, element) => {
       const tagName = $(element).prop("tagName").toLowerCase();
-
-      // Tangkap teks dari elemen paragraf, daftar, atau div sederhana
       if (tagName === "p" || tagName === "div") {
         deskripsi += $(element).text().trim() + "\n";
       } else if (tagName === "ul" || tagName === "ol") {
-        $(element).children().each((i, child) => {
-          deskripsi += "- " + $(child).text().trim() + "\n";
-        });
+        $(element)
+          .children()
+          .each((i, child) => {
+            deskripsi += "- " + $(child).text().trim() + "\n";
+          });
       }
     });
-
     detail["deskripsi"] = deskripsi.trim();
 
-    // Menangkap gambar
+    // ambil gambar
     const gambarList = [];
     mainContent.find("img").each((index, img) => {
       const gambar = {
@@ -105,7 +128,6 @@ const fetchNewsDetail = async (berita_id) => {
       };
       gambarList.push(gambar);
     });
-
     detail["gambar"] = gambarList;
 
     return detail;
@@ -115,13 +137,16 @@ const fetchNewsDetail = async (berita_id) => {
   }
 };
 
+// ============================================
+// Fungsi utama (fetch + parse berita via proxy)
+// ============================================
 const fetchAndParseNews = async () => {
   try {
     const html = await fetchNewsData();
     const parsedData = parseNewsData(html);
     return parsedData;
   } catch (error) {
-    console.error(`Error parsing news: ${error.message}`);
+    console.error(`Error fetching or parsing news data: ${error.message}`);
   }
 };
 
