@@ -1,17 +1,37 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+// Gunakan proxy agar tidak kena 403
+const PROXY_BASE = "https://proxi-web.vercel.app/fetch?url=";
+
 const fetchData = async () => {
-  const url = "https://jkt48.com/theater/schedule";
-  const result = await axios.get(url);
-  return result.data;
+  const targetUrl = "https://jkt48.com/theater/schedule";
+  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
+
+  try {
+    const result = await axios.get(proxyUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://jkt48.com/",
+        "Connection": "keep-alive",
+      },
+    });
+    return result.data;
+  } catch (error) {
+    throw new Error(`Error fetching data: ${error.message}`);
+  }
 };
 
 const parseData = (html) => {
   const $ = cheerio.load(html);
 
-  // Target the table with specific selector
-  const table = $("body > div.container > div.row > div > div > div:nth-child(5) > div.table-responsive.table-pink__scroll table");
+  const table = $(
+    "body > div.container > div.row > div > div > div:nth-child(5) > div.table-responsive.table-pink__scroll table"
+  );
 
   const scheduleData = [];
 
