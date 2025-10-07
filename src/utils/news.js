@@ -1,42 +1,22 @@
-const axios = require("axios");
+// src/utils/news.js
 const cheerio = require("cheerio");
+const { fetchWithPuppeteer } = require("./fetchWithPuppeteer");
 
-// Konfigurasi header agar menyerupai browser sungguhan
-const axiosConfig = {
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Accept":
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://jkt48.com/",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "DNT": "1",
-  },
-};
-
-// URL proxy lokal kamu (ganti port jika berbeda)
-const PROXY_BASE = "https://proxi-web.vercel.app/fetch?url=";
-
-// ============================================
-// Fungsi untuk fetch data berita via proxy
-// ============================================
+/**
+ * Ambil halaman list berita via Puppeteer (bypass Cloudflare)
+ */
 const fetchNewsData = async () => {
-  const targetUrl = "https://jkt48.com/news/list?lang=id";
-  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
-
-  try {
-    const response = await axios.get(proxyUrl, axiosConfig);
-    return response.data;
-  } catch (error) {
-    throw new Error(`Error fetching data: ${error.message}`);
-  }
+  const url = "https://jkt48.com/news/list?lang=id";
+  // tunggu selector list berita muncul
+  return await fetchWithPuppeteer(url, {
+    waitForSelectors: [".entry-news__list", ".entry-news__list--item", ".news-list"],
+    timeout: 60000,
+  });
 };
 
-// ============================================
-// Fungsi parsing HTML berita
-// ============================================
+/**
+ * Parse list berita (judul, waktu, badge, berita_id)
+ */
 const parseNewsData = (html) => {
   const $ = cheerio.load(html);
   const list_berita_mentah = $(".entry-news__list");
@@ -50,30 +30,23 @@ const parseNewsData = (html) => {
     const model = {};
     const berita_mentah = $(element);
 
-    const badge_div = berita_mentah.find(".entry-news__list--label");
-    const badge_img = badge_div.find("img");
+    const badge_img = berita_mentah.find(".entry-news__list--label img");
     if (badge_img.attr("src")) {
-      model["badge_url"] = badge_img.attr("src");
+      model.badge_url = badge_img.attr("src");
     }
 
     const title_div = berita_mentah.find(".entry-news__list--item");
+    model.waktu = title_div.find("time").text().trim();
+    model.judul = title_div.find("h3").text().trim();
 
-    const waktu = title_div.find("time").text().trim();
-    model["waktu"] = waktu;
-
-    const judul = title_div.find("h3").text().trim();
-    model["judul"] = judul;
-
-    const url_berita_full = title_div.find("h3").find("a").attr("href");
+    const url_berita_full = title_div.find("h3 a").attr("href");
     if (!url_berita_full) {
-      console.warn("Missing URL for a news item. Skipping.");
+      // skip broken item
       return;
     }
-
-    const url_berita_full_rplc = url_berita_full
-      .replace("?lang=id", "")
-      .replace("/news/detail/id/", "");
-    model["berita_id"] = url_berita_full_rplc;
+    const berita_id = url_berita_full.replace("?lang=id", "").replace("/news/detail/id/", "");
+    model.berita_id = berita_id;
+    model.url = url_berita_full.startsWith("http") ? url_berita_full : `https://jkt48.com${url_berita_full}`;
 
     data_list_berita.push(model);
   });
@@ -81,54 +54,85 @@ const parseNewsData = (html) => {
   return { berita: data_list_berita };
 };
 
-// ============================================
-// Fungsi ambil detail berita via proxy
-// ============================================
+/**
+ * Ambil detail berita (deskripsi & gambar)
+ */
 const fetchNewsDetail = async (berita_id) => {
-  const targetUrl = `https://jkt48.com/news/detail/id/${berita_id}?lang=id`;
-  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
+  const url = `https://jkt48.com/news/detail/id/${berita_id}?lang=id`;
 
   try {
-    const response = await axios.get(proxyUrl, axiosConfig);
-    const $ = cheerio.load(response.data);
+    // tunggu selector konten artikel muncul; pakai beberapa fallback selector
+    const html = await fetchWithPuppeteer(url, {
+      waitForSelectors: [
+        "body > div.container .entry-contents__main-area",
+        ".entry-news__detail",
+        ".entry-contents__main-area",
+        "article",
+        ".news-detail",
+      ],
+      timeout: 90000,
+    });
+
+    const $ = cheerio.load(html);
     const detail = {};
 
-    const mainContentSelector =
-      "body > div.container > div.row > div.col-lg-9.order-1.order-lg-2.entry-contents__main-area > div > div > div:nth-child(4)";
-    const mainContent = $(mainContentSelector);
+    // Try multiple selectors to find the main article content
+    const possibleSelectors = [
+      "body > div.container > div.row > div.col-lg-9.order-1.order-lg-2.entry-contents__main-area > div > div > div:nth-child(4)",
+      ".entry-contents__main-area",
+      ".entry-news__detail",
+      "article",
+      ".news-detail",
+    ];
 
-    if (mainContent.length === 0) {
-      throw new Error("Konten utama tidak ditemukan.");
+    let mainContent = null;
+    for (const sel of possibleSelectors) {
+      const node = $(sel);
+      if (node && node.length > 0) {
+        mainContent = node.first();
+        break;
+      }
     }
 
-    // ambil deskripsi
+    if (!mainContent || mainContent.length === 0) {
+      // last resort: use a selector that contains most article paragraphs
+      mainContent = $("article, .entry-contents__main-area, .entry-news__detail").first();
+    }
+
+    if (!mainContent || mainContent.length === 0) {
+      throw new Error("Konten utama tidak ditemukan (selector fallback gagal).");
+    }
+
+    // Ambil deskripsi (gabungkan p, div, list)
     let deskripsi = "";
-    mainContent.find("p, ul, ol, div").each((index, element) => {
-      const tagName = $(element).prop("tagName").toLowerCase();
-      if (tagName === "p" || tagName === "div") {
-        deskripsi += $(element).text().trim() + "\n";
-      } else if (tagName === "ul" || tagName === "ol") {
-        $(element)
+    mainContent.find("p, div, ul, ol").each((idx, el) => {
+      const tag = $(el).prop("tagName").toLowerCase();
+      if (tag === "p" || tag === "div") {
+        const t = $(el).text().trim();
+        if (t) deskripsi += t + "\n";
+      } else if (tag === "ul" || tag === "ol") {
+        $(el)
           .children()
-          .each((i, child) => {
-            deskripsi += "- " + $(child).text().trim() + "\n";
+          .each((i, li) => {
+            const t = $(li).text().trim();
+            if (t) deskripsi += "- " + t + "\n";
           });
       }
     });
-    detail["deskripsi"] = deskripsi.trim();
+    detail.deskripsi = deskripsi.trim();
 
-    // ambil gambar
+    // Ambil gambar di dalam mainContent
     const gambarList = [];
-    mainContent.find("img").each((index, img) => {
-      const gambar = {
+    mainContent.find("img").each((i, img) => {
+      gambarList.push({
         title: $(img).attr("title") || "",
-        src: $(img).attr("src"),
-        width: $(img).attr("width"),
-        height: $(img).attr("height"),
-      };
-      gambarList.push(gambar);
+        src: $(img).attr("src") || $(img).attr("data-src") || "",
+        width: $(img).attr("width") || "",
+        height: $(img).attr("height") || "",
+        alt: $(img).attr("alt") || "",
+      });
     });
-    detail["gambar"] = gambarList;
+    detail.gambar = gambarList;
 
     return detail;
   } catch (error) {
@@ -137,22 +141,27 @@ const fetchNewsDetail = async (berita_id) => {
   }
 };
 
-// ============================================
-// Fungsi utama (fetch + parse berita via proxy)
-// ============================================
+/**
+ * Fetch + parse list + details (convenience)
+ */
 const fetchAndParseNews = async () => {
   try {
     const html = await fetchNewsData();
-    const parsedData = parseNewsData(html);
-    return parsedData;
+    const parsed = parseNewsData(html);
+
+    // fetch detail in parallel but limit concurrency if you want (here full parallel)
+    const newsWithDetail = await Promise.all(
+      parsed.berita.map(async (item) => {
+        const detail = await fetchNewsDetail(item.berita_id);
+        return { ...item, detail };
+      })
+    );
+
+    return newsWithDetail;
   } catch (error) {
-    console.error(`Error fetching or parsing news data: ${error.message}`);
+    console.error(`Error parsing news: ${error.message}`);
+    return [];
   }
 };
 
-module.exports = {
-  fetchNewsData,
-  parseNewsData,
-  fetchNewsDetail,
-  fetchAndParseNews,
-};
+module.exports = { fetchNewsData, parseNewsData, fetchNewsDetail, fetchAndParseNews };

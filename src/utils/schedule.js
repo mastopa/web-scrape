@@ -1,105 +1,57 @@
-const axios = require("axios");
 const cheerio = require("cheerio");
-
-// Gunakan proxy agar tidak kena 403
-const PROXY_BASE = "https://proxi-web.vercel.app/fetch?url=";
+const { fetchWithPuppeteer } = require("./fetchWithPuppeteer");
 
 const fetchSpecificData = async () => {
-  const targetUrl = "https://jkt48.com/theater/schedule?lang=id";
-  const proxyUrl = `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
-
-  try {
-    const response = await axios.get(proxyUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://jkt48.com/",
-        "Connection": "keep-alive",
-      },
-    });
-    return response.data;
-  } catch (error) {
-    throw new Error(`Error fetching data: ${error.message}`);
-  }
+  const url = "https://jkt48.com/theater/schedule?lang=id";
+  return await fetchWithPuppeteer(url);
 };
 
 const parseSpecificData = (html) => {
   const $ = cheerio.load(html);
-
   const tableBody = $("tbody");
   const rows = tableBody.find("tr");
-
   const bulan_tahun = $(".entry-schedule__header--center").text().trim();
 
   const lists = [];
-  const size = rows.length;
-  let x = 0;
+  rows.each((i, row) => {
+    const model = { bulan_tahun };
+    const list_td = $(row).find("td");
 
-  while (x < size) {
-    const model = {};
-    model["bulan_tahun"] = bulan_tahun;
+    const tanggal_raw = list_td.eq(0).find("h3").text();
+    const tanggal_spl = tanggal_raw.replace(")", "").split("(");
+    model.tanggal = tanggal_spl[0]?.trim();
+    model.hari = tanggal_spl[1]?.trim();
 
-    const list_td = rows.eq(x).find("td");
+    const events = list_td.eq(1).find("div");
+    if (events.length > 0) {
+      events.each((_, ev) => {
+        const e = $(ev);
+        const clone = { ...model };
 
-    const tanggal_mentah = list_td.eq(0).find("h3").text();
-    const tanggal_rplc = tanggal_mentah.replace(")", "");
-    const tanggal_spl = tanggal_rplc.split("(");
+        const badge_img = e.find("span img").attr("src");
+        if (badge_img) clone.badge_url = badge_img;
 
-    if (tanggal_spl.length > 0) {
-      model["tanggal"] = tanggal_spl[0];
-    }
-    if (tanggal_spl.length >= 1) {
-      model["hari"] = tanggal_spl[1];
-    }
+        const event_name_full = e.find("p").text().trim();
+        clone.event_time = event_name_full.slice(0, 5);
+        clone.event_name = event_name_full.slice(6);
 
-    const list_event = list_td.eq(1).find("div");
-    const size_of_event = list_event.length;
-    let position_event = 0;
+        const url_event = e.find("a").attr("href");
+        if (url_event) {
+          clone.event_id = url_event
+            .replace("?lang=id", "")
+            .replace("/theater/schedule/id/", "");
+        }
 
-    while (position_event < size_of_event) {
-      const event = list_event.eq(position_event);
-
-      const badge_img = event.find("span img");
-      if (badge_img.attr("src")) {
-        model["badge_url"] = badge_img.attr("src");
-      }
-
-      const event_name_full = event.find("p").text().trim();
-      const event_name = event_name_full.slice(6);
-      const event_jam = event_name_full.slice(0, 5);
-
-      model["event_name"] = event_name;
-      model["event_time"] = event_jam;
-
-      const url_event_full = event.find("a").attr("href");
-      if (url_event_full) {
-        const url_event_full_rplc = url_event_full.replace("?lang=id", "");
-        const url_event_full_rplc_2 = url_event_full_rplc.replace(
-          "/theater/schedule/id/",
-          ""
-        );
-        model["event_id"] = url_event_full_rplc_2;
-        model["have_event"] = true;
-      }
-
-      lists.push(model);
-      position_event++;
-    }
-
-    if (size_of_event === 0) {
-      model["have_event"] = false;
+        clone.have_event = true;
+        lists.push(clone);
+      });
+    } else {
+      model.have_event = false;
       lists.push(model);
     }
-    x++;
-  }
+  });
 
   return lists;
 };
 
-module.exports = {
-  fetchSpecificData,
-  parseSpecificData,
-};
+module.exports = { fetchSpecificData, parseSpecificData };
